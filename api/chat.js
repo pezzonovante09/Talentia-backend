@@ -1,6 +1,17 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export default async function handler(req, res) {
+  // --- CORS FIX ---
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  // Handle preflight
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
+  // Block any other methods except POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -18,22 +29,23 @@ export default async function handler(req, res) {
           parts: [
             {
               text:
-                "You are Tali the Dino — a friendly tutor for young kids (5–8 y.o).\n" +
-                "Always reply in 1–2 short sentences.\n" +
-                "Never make explanations long.\n" +
-                "Child’s current task: " + task + "\n\n" +
-                "Message: " + message
-            }
-          ]
-        }
-      ]
+                "You are Tali the Dino – a friendly tutor for kids age 5–8.\n" +
+                "Always speak in short, simple sentences.\n" +
+                "Current task: " +
+                task +
+                "\n\nUser message: " +
+                message,
+            },
+          ],
+        },
+      ],
     });
 
     const reply = result?.response?.text() || "I'm here to help!";
-    return res.status(200).json({ reply });
 
+    return res.status(200).json({ reply });
   } catch (error) {
-    console.error("Gemini API error:", error);
+    console.error("Gemini error:", error);
     return res.status(500).json({ error: "AI server error" });
   }
 }
