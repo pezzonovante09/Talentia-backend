@@ -1,17 +1,16 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 export default async function handler(req, res) {
-  // --- CORS FIX ---
+  // --- CORS ---
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  // Handle preflight
+  // For preflight
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
-  // Block any other methods except POST
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }
@@ -19,38 +18,45 @@ export default async function handler(req, res) {
   try {
     const { message, task } = req.body;
 
+    // CHECK ENV KEY EXISTS
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("Missing GEMINI_API_KEY");
+      return res.status(500).json({ error: "API key missing" });
+    }
+
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+    const model = genAI.getGenerativeModel({
+      model: "gemini-2.5-flash",
+    });
+
+    const prompt =
+      "You are Tali the Dino – a friendly helper for kids aged 5–8.\n" +
+      "RULES:\n" +
+      "- NEVER give the correct answer.\n" +
+      "- NEVER solve the task for the child.\n" +
+      "- ALWAYS give hints only.\n" +
+      "- Speak very simply (1–2 short sentences).\n" +
+      "- Encourage the child.\n\n" +
+      "Child task (DO NOT SOLVE): " +
+      task +
+      "\n\nChild says: " +
+      message;
 
     const result = await model.generateContent({
       contents: [
         {
           role: "user",
-          parts: [
-            {
-              text:
-                "You are Tali the Dino – a friendly tutor for kids age 5–8.\n" +
-                "IMPORTANT RULES:\n" +
-                "- Never give the solution.\n" +
-                "- Never say the correct answer.\n" +
-                "- Only give hints or encouragement.\n" +
-                "- Speak in short, simple sentences.\n" +
-                "- Help the child think, not solve.\n\n" +
-                "Current task (DO NOT SOLVE IT): " +
-                task +
-                "\n\nUser message: " +
-                message,
-            },
-          ],
+          parts: [{ text: prompt }],
         },
       ],
     });
 
-    const reply = result?.response?.text() || "I'm here to help!";
+    const reply = result?.response?.text?.() || "I'm here! Let's think together.";
 
-    return res.status(200).json({ reply });
+    res.status(200).json({ reply });
   } catch (error) {
-    console.error("Gemini error:", error);
-    return res.status(500).json({ error: "AI server error" });
+    console.error("Gemini backend error:", error);
+    res.status(500).json({ error: "AI server error" });
   }
 }
