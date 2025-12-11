@@ -1,25 +1,40 @@
-export default async function handler(req, res) {
+export const config = {
+  runtime: "edge",
+};
+
+export default async function handler(req) {
   try {
-    const { message, task, correctAnswer, attempts, mistakes, history } = req.body;
+    // --- CORS preflight ---
+    if (req.method === "OPTIONS") {
+      return new Response(null, {
+        status: 200,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type",
+        },
+      });
+    }
+
+    const body = await req.json();
+    const { message, task, correctAnswer, attempts, mistakes, history } = body;
 
     const prompt = `
-    You are Tali, a kids tutor (age 5–8). Always answer briefly.
+You are Tali, a friendly tutor for kids aged 5–8.
+Always answer in 1–2 short sentences.
 
-    Task: "${task}"
-    Correct answer: "${correctAnswer}"
+Task: "${task}"
+Correct answer: "${correctAnswer}"
 
-    Rules:
-    - If the child's message MATCHES the correct answer (string compare):
-         Respond: "Yes! That's correct! Great job!"
-    - If it's wrong:
-         Give 1 very small hint.
-    - Do NOT reveal the answer.
-    - Answer in 1–2 short sentences.
+Rules:
+- If the child's message equals the correct answer → praise briefly.
+- If wrong → small hint only (never reveal the answer).
+- Always upbeat and simple.
 
-    Conversation:
-    ${history.map(m => m.role + ": " + m.content).join("\n")}
+Conversation:
+${history.map((m) => `${m.role}: ${m.content}`).join("\n")}
 
-    USER: ${message}
+Child says: ${message}
     `;
 
     const apiRes = await fetch(
@@ -29,7 +44,12 @@ export default async function handler(req, res) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          contents: [
+            {
+              role: "user",
+              parts: [{ text: prompt }],
+            },
+          ],
         }),
       }
     );
@@ -37,12 +57,26 @@ export default async function handler(req, res) {
     const data = await apiRes.json();
 
     const reply =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
       "Let's keep going!";
 
-    res.status(200).json({ reply });
-  } catch (e) {
-    console.error("Backend error:", e);
-    res.status(500).json({ reply: "Tali is confused." });
+    return new Response(JSON.stringify({ reply }), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+
+  } catch (err) {
+    console.error("BACKEND ERROR:", err);
+
+    return new Response(JSON.stringify({ reply: "Tali is confused." }), {
+      status: 500,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
   }
 }
