@@ -1,10 +1,10 @@
-\export const config = {
+export const config = {
   runtime: "edge",
 };
 
 export default async function handler(req) {
   try {
-    // --- CORS preflight ---
+    // CORS
     if (req.method === "OPTIONS") {
       return new Response(null, {
         status: 200,
@@ -19,51 +19,78 @@ export default async function handler(req) {
     const body = await req.json();
     const { message, task, correctAnswer, history } = body;
 
-    // Compare with trimming punctuation
-    const cleanedUserAnswer = message.trim().replace("?", "");
+    if (!task || correctAnswer === undefined) {
+      return new Response(
+        JSON.stringify({ reply: "Missing fields." }),
+        {
+          status: 400,
+          headers: { "Access-Control-Allow-Origin": "*" },
+        }
+      );
+    }
+
+    const cleanedUser = message.trim().replace("?", "").toLowerCase();
     const cleanedCorrect = String(correctAnswer).trim();
 
-    const isCorrect = cleanedUserAnswer === cleanedCorrect;
+    const helpKeywords = ["help", "please", "подскажи", "i don't know", "не знаю", "help me"];
 
-    // ---------- PROMPTS ----------
+    const isHelp = helpKeywords.some((k) => cleanedUser.includes(k));
+    const isCorrect = cleanedUser === cleanedCorrect.toLowerCase();
+
     let prompt;
 
-    if (isCorrect) {
+    if (isHelp) {
+      // CHILD REQUESTED HELP
       prompt = `
-You are Tali the Dino — a friendly learning companion for children aged 5–8.
+You are Tali the Dino — a friendly tutor for kids (5–8 years old).
+
+The child is asking for help:
+"${message}"
+
+Task: "${task}"
+
+Give ONE small, simple hint.
+Do NOT tell the answer.
+Use one short sentence only.
+
+Examples:
+- "Try counting them slowly one more time!"
+- "Look again — one group is a little bigger."
+- "Start by checking the first number."
+`;
+    } else if (isCorrect) {
+      // CORRECT ANSWER
+      prompt = `
+You are Tali the Dino, a friendly kids tutor.
 
 The child answered correctly.
 
-Respond with ONE short, simple encouraging sentence.
-Do NOT add explanations.
-Examples:
+Respond with ONE short praise sentence, like:
 - "Yes! That's correct! Great job!"
-- "You got it! I'm proud of you!"
-- "Awesome! You did it!"
-      `;
+- "You did it! Amazing!"
+
+Do NOT add anything else.
+`;
     } else {
+      // INCORRECT ANSWER
       prompt = `
-You are Tali the Dino — a friendly tutor for children aged 5–8.
+You are Tali the Dino — a friendly tutor for kids 5–8.
+
+The child answered incorrectly:
+"${message}"
 
 Task: "${task}"
-Correct answer (DO NOT reveal this): "${correctAnswer}"
-
-The child answered incorrectly.
+Do NOT reveal the answer.
 
 Give ONE very small hint.
 Use ONE short sentence only.
-Never reveal the answer.
-Never give long explanations.
-
 Examples:
 - "Try counting again — you're close!"
 - "Look carefully, one group is larger."
-- "Think slowly, you can do it!"
-- "Maybe try comparing them one more time!"
-      `;
+- "Maybe compare them one more time!"
+`;
     }
 
-    // ---------- SEND TO GEMINI ----------
     const apiRes = await fetch(
       "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
         process.env.GEMINI_API_KEY,
@@ -71,28 +98,24 @@ Examples:
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: prompt }],
-            },
-          ],
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
         }),
       }
     );
 
     const data = await apiRes.json();
 
-    const reply =
+    let reply =
       data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "Let's keep going!";
+      (isCorrect
+        ? "Yes! That's correct! Great job!"
+        : "Try again — you can do it!");
 
-    // ---------- SEND RESPONSE ----------
     return new Response(JSON.stringify({ reply }), {
       status: 200,
       headers: {
-        "Content-Type": "application/json",
         "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/json",
       },
     });
 
