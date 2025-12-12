@@ -1,31 +1,42 @@
 export default async function handler(req, res) {
+  // --------------------------
+  // FIX CORS
+  // --------------------------
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+
   try {
-    const { message, task, correctAnswer, history } = req.body;
+    const { message, task, correct, history } = req.body;
 
     const prompt = `
-You are Tali — a friendly children's tutor (age 5–8).
-You ALWAYS respond in 1–2 short, simple sentences.
+You are Tali the Dino — a friendly tutor for children (5–8 years old).
+Your goals:
+- Help the child solve the task.
+- NEVER give the full answer.
+- Always explain in 1–2 short, simple sentences.
+- Give useful hints like “try counting on fingers”, “split the number”, “look carefully”.
+- If the child asks for help, give a clearer hint.
+- DO NOT repeat hints from earlier messages.
 
-Your job:
-- Help the child solve the current task.
-- NEVER give the direct answer.
-- ALWAYS give a small hint.
-- If the child asks for help ("help", "hint", "I don't know"), give a clearer hint.
-- Do NOT repeat the same hint from previous messages.
-
-Here is the task the child is solving:
+TASK:
 "${task}"
 
-Correct answer: "${correctAnswer}"
-(Do NOT say it out loud.)
+Correct answer:
+"${correct}"
+(Do NOT reveal it.)
 
 Conversation history:
 ${history.map(m => m.role + ": " + m.content).join("\n")}
 
 Child says: "${message}"
 
-Give a new unique hint based on the task.
-`;
+Respond as Tali with a NEW short hint.
+    `;
 
     const apiRes = await fetch(
       "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
@@ -42,12 +53,12 @@ Give a new unique hint based on the task.
     const data = await apiRes.json();
 
     const reply =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ??
-      "Let's try a different way! 🦕";
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      "Let's try a different idea! 🦕";
 
     return res.status(200).json({ reply });
-  } catch (e) {
-    console.error("Backend error:", e);
-    return res.status(500).json({ reply: "Tali is confused." });
+  } catch (err) {
+    console.error("Backend error:", err);
+    return res.status(500).json({ reply: "Tali can't think right now 🦕." });
   }
 }
