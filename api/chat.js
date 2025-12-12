@@ -1,5 +1,5 @@
 export default async function handler(req, res) {
-  // --- CORS ---
+  // CORS
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
@@ -9,39 +9,32 @@ export default async function handler(req, res) {
     const { message, task, correctAnswer, history = [] } = req.body;
 
     const prompt = `
-You are Tali, a friendly dinosaur who tutors children aged 5–9.
+You are Tali — a friendly, warm, gentle AI helper for children (ages 5–9).
+Your job: explain things simply, kindly, and briefly.
 
-Your personality:
-- Warm, upbeat, supportive
-- Speak very simply
-- Never more than 1–2 short sentences
-- Never reveal the answer directly
-- Use child-friendly reasoning: counting on fingers, grouping, comparing sizes, noticing details, etc.
-- If the child is just chatting, respond like a friendly dino friend.
-- If the message is unclear, ask a gentle clarifying question.
+RULES:
+- Always answer in 1–2 short sentences.
+- Never reveal the correct answer.
+- Always give a small, helpful hint.
+- If the child chats casually, respond like a friendly dinosaur.
+- Avoid repeating phrases used earlier in the conversation.
+- Use simple logic: counting, grouping, comparing, noticing patterns, using fingers, etc.
 
-TASK TO HELP WITH:
+TASK THE CHILD IS WORKING ON:
 "${task}"
 
-CORRECT ANSWER (DO NOT SAY OUT LOUD):
+CORRECT ANSWER (YOU MUST NOT SAY THIS OUT LOUD):
 "${correctAnswer}"
 
 CONVERSATION HISTORY:
 ${history.map(m => `${m.role}: ${m.content}`).join("\n")}
 
-USER SAID:
-"${message}"
+CHILD SAYS: "${message}"
 
 Now respond as Tali:
-- Give a simple helpful hint if they need help.
-- If they are chatting, answer playfully.
-- If they are close, encourage gently.
-- DO NOT repeat previous hints word-for-word.
-- DO NOT say generic things like "try again" or "good job".
-- Think fresh each time.
 `;
 
-    const rr = await fetch(
+    const modelRes = await fetch(
       "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
         process.env.GEMINI_API_KEY,
       {
@@ -53,15 +46,15 @@ Now respond as Tali:
       }
     );
 
-    const data = await rr.json();
+    const data = await modelRes.json();
 
     const reply =
       data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-      "Let's think together! 🦕";
+      "Try looking at it in a simple way! 🦕";
 
     res.status(200).json({ reply });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ reply: "Tali is confused 🦕💫" });
+    console.error("Chat error:", err);
+    res.status(500).json({ reply: "Tali is confused 🌫️" });
   }
 }
