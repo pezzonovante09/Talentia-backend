@@ -10,66 +10,41 @@ export default async function handler(req, res) {
   // ----------------
 
   try {
-    const { message, task, correctAnswer, attempts, mistakes, history } = req.body;
+    const { message, task, correctAnswer, history } = req.body;
 
-    const isCorrect = message.trim() === String(correctAnswer).trim();
-    const userAskedHelp = /help|подскажи|не понимаю|hint/i.test(message);
+    const trimmedUser = message.trim();
+    const isCorrect = trimmedUser === String(correctAnswer).trim();
 
-    let basePrompt = `
-You are Tali — a friendly tutor for kids (5–8 years old).
-Answer VERY SHORT: max 1–2 sentences. Simple words only.
-Never reveal the correct answer.
-Never continue giving hints after the kid answered correctly.
-
-Task: "${task}"
-Correct answer: "${correctAnswer}"
-Mistakes: ${mistakes}
-
-Conversation:
-${history.map(m => m.role + ": " + m.content).join("\n")}
-
-User: ${message}
-`;
-
-    // ---------- CORRECT ANSWER ----------
+    // -----------------------------
+    // 1) CORRECT ANSWER ALWAYS → PRAISE
+    // -----------------------------
     if (isCorrect) {
       return res.status(200).json({
         reply: "Yes! That's correct! Great job! 🦕💚"
       });
     }
 
-    // ---------- HELP REQUEST ----------
-    if (userAskedHelp) {
-      const helpPrompt = basePrompt + `
-The child asked for help.
-Give ONE very small hint.
-Do NOT give the correct answer.`;
+    // If not correct → ALWAYS HELP
+    const helpPrompt = `
+You are Tali — a friendly learning dinosaur for kids aged 5–8.
+Your job is ALWAYS to help the child understand, even after many mistakes.
 
-      const apiRes = await fetch(
-        "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
-          process.env.GEMINI_API_KEY,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ role: "user", parts: [{ text: helpPrompt }] }]
-          })
-        }
-      );
+RULES:
+- Always answer in 1–2 short, simple sentences.
+- Never reveal the correct answer.
+- Always give a small hint + encouragement.
+- Keep the language friendly and simple for children.
+- The child just gave a wrong answer or asked for help.
 
-      const data = await apiRes.json();
-      const reply =
-        data?.candidates?.[0]?.content?.parts?.[0]?.text ??
-        "Maybe try counting again?";
+Task: "${task}"
+Correct answer: "${correctAnswer}" (DO NOT TELL THIS)
 
-      return res.status(200).json({ reply });
-    }
+Conversation history:
+${history.map(m => m.role + ": " + m.content).join("\n")}
 
-    // ---------- WRONG ANSWER ----------
-    const wrongPrompt = basePrompt + `
-The child gave a wrong answer.
-Give ONE short encouraging hint.
-Do NOT give the correct answer.`;
+User: ${trimmedUser}
+Respond with: a tiny hint + encouragement.
+`;
 
     const apiRes = await fetch(
       "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
@@ -78,17 +53,18 @@ Do NOT give the correct answer.`;
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: wrongPrompt }] }]
+          contents: [{ role: "user", parts: [{ text: helpPrompt }] }]
         })
       }
     );
 
     const data = await apiRes.json();
-    const reply =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ??
-      "Try again! You can do it!";
 
-    return res.status(200).json({ reply });
+    const aiReply =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ??
+      "Try again! You’re doing great!";
+
+    return res.status(200).json({ reply: aiReply });
 
   } catch (err) {
     console.error("Backend error:", err);
