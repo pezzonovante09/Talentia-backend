@@ -1,112 +1,88 @@
-// api/chat.js
 export default async function handler(req, res) {
   // --- CORS ---
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
-  // -------------------
 
   try {
-    const { message, task, correctAnswer, history = [] } = req.body || {};
+    const { message, task, correctAnswer, history = [] } = req.body;
 
-    const userText = String(message).trim();
-    const correctText = String(correctAnswer).trim().toLowerCase();
+    const user = String(message).trim();
+    const correct = String(correctAnswer).trim();
+    const isCorrect = user === correct;
 
     const lastAssistant = history
-      ?.slice()
-      ?.reverse()
-      ?.find((m) => m.role === "assistant");
-    const lastAssistantText = lastAssistant ? lastAssistant.content.trim() : "";
+      .slice()
+      .reverse()
+      .find((m) => m.role === "assistant");
+    const lastText = lastAssistant?.content?.trim() || "";
 
-    const isCorrect =
-      userText.toLowerCase() === correctText.toLowerCase();
+    const userWantsHint = /help|hint|подскажи|не понимаю|explain/i.test(
+      user.toLowerCase()
+    );
 
-    // ----------------------
-    // If correct → praise
-    // ----------------------
+    //----------------------------------------------
+    // CASE 1 — User answered CORRECTLY
+    //----------------------------------------------
     if (isCorrect) {
       return res.status(200).json({
-        reply: "Yes! That's correct! You're amazing! 🦕💚"
+        reply: "Yes! That's correct! You're amazing! 🦕💚",
       });
     }
 
-    // ----------------------
-    // Build prompt for generating hints
-    // ----------------------
-    const makePrompt = (forceDifferent = false) => `
-You are Tali — a friendly dinosaur tutor for children aged 5–8.
+    //----------------------------------------------
+    // CASE 2 — User wants a hint → generate hint
+    //----------------------------------------------
+    if (userWantsHint) {
+      const prompt = `
+You are Tali — a friendly dinosaur tutor for kids aged 5–8.
+Give ONE short hint that helps with this task.
+Never reveal the answer.
+Always be friendly, simple and encouraging.
+Do not repeat your previous hint.
 
-IMPORTANT:
-- You MUST give a real helpful hint for the task.
-- You MUST NOT talk about phrases, writing suggestions, options, formatting, or meta comments.
-- You MUST NOT discuss how you might answer.
-- You MUST NOT give long explanations.
-- You MUST answer in ONE short hint sentence + ONE encouragement sentence.
-- Your response MUST be direct, simple, and child-friendly.
-- NEVER reveal the correct answer.
+Task: "${task}"
+Correct answer (DO NOT TELL): "${correct}"
 
-Correct example:
-"Try counting the groups one by one 🧮. You can do it! 🌟"
+Previous assistant message: "${lastText}"
+User message: "${user}"
 
-Bad examples (do NOT do this):
-- "Here are some options you might say..."
-- "You could write..."
-- "I personally recommend..."
-- "Shorter version is..."
-
-Task: "{task}"
-User message: "{message}"
-
-Now give ONLY the final hint message for the child. No analysis.
-
-User message: "${userText}"
-
-${
-  forceDifferent
-    ? `IMPORTANT: Your previous hint was:\n"${lastAssistantText}"\nYour NEW hint MUST be different from that.`
-    : ""
-}
-
-Conversation history:
-${history.map((m) => m.role + ": " + m.content).join("\n")}
-
-Now give a new hint:
+Now give ONE helpful hint for a child.
 `;
 
-    // ----------------------
-    // 1st attempt: generate normal hint
-    // ----------------------
-    let hint = await callGemini(makePrompt(false));
+      const hint = await askGemini(prompt);
 
-    // If Gemini returned exactly the same as last time → regenerate
-    if (
-      hint &&
-      lastAssistantText &&
-      hint.trim().toLowerCase() === lastAssistantText.trim().toLowerCase()
-    ) {
-      hint = await callGemini(makePrompt(true));
+      return res.status(200).json({
+        reply: hint || "Try looking carefully again — you can do it!",
+      });
     }
 
-    // If still empty → fallback to rephrase
-    if (!hint || hint.trim().length < 2) {
-      hint = await callGemini(
-        `Rephrase this hint to make it shorter and friendlier for a child: "${lastAssistantText}"`
-      );
-    }
+    //----------------------------------------------
+    // CASE 3 — Wrong answer, but no hint asked
+    //----------------------------------------------
+    const encouragements = [
+      "Good try! Want a hint? 🦕💚",
+      "Almost! You can ask me for help anytime 🦕✨",
+      "Nice effort! If you need help, just say 'help'!",
+      "You're doing great! Say 'hint' if you want help!",
+      "Keep going! I can help if you ask! 🌟",
+    ];
 
-    return res.status(200).json({ reply: hint || "Try again!" });
+    const filtered = encouragements.filter((e) => e !== lastText);
+    const reply = filtered[Math.floor(Math.random() * filtered.length)];
+
+    return res.status(200).json({ reply });
   } catch (err) {
     console.error("Backend error:", err);
     return res.status(500).json({ reply: "Tali is confused right now 🦕💫" });
   }
 }
 
-// ----------------------
-// Gemini request helper
-// ----------------------
-async function callGemini(prompt) {
+// ---------------------------------------------------------
+// Gemini helper function
+// ---------------------------------------------------------
+async function askGemini(prompt) {
   try {
     const apiRes = await fetch(
       "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
@@ -121,11 +97,9 @@ async function callGemini(prompt) {
     );
 
     const data = await apiRes.json();
-    return (
-      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null
-    );
+    return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
   } catch (err) {
-    console.error("Gemini call error:", err);
+    console.error("Gemini error:", err);
     return null;
   }
 }
