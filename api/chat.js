@@ -1,73 +1,58 @@
-// Talentia-backend/api/chat.js  (Vercel Edge function / Node fetch compatible)
-export const config = { runtime: "edge" };
+// Talentia-backend/api/chat.js  
+export default async function handler(req, res) {
+  // -------- CORS --------
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-// Preflight handler
-export function OPTIONS() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    },
-  });
-}
+  // Preflight
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
 
-export default async function handler(req) {
   try {
-    // Read JSON body (works with Edge request)
-    const body = await req.json().catch(() => ({}));
-    const { message = "", task = "", correct = "", history = [] } = body;
+    const { message = "", task = "", correct = "", history = [] } = req.body;
 
-    // Build prompt (short, safe)
     const prompt = `
-You are Tali the Dino — a friendly, warm tutor for children 5–8.
-Rules:
-- Reply in 1–2 short sentences.
-- Never give the correct answer.
-- If child asks "help" or "hint" give a short actionable hint related to the task.
-- If child gives the correct answer, praise warmly.
+You are Tali the Dino — a kind friendly tutor for kids (age 5–8).
+Your rules:
+- Always answer in 1–2 short sentences.
+- Never say the correct answer.
+- If the child says "help" or "hint", give a simple helpful hint.
+- If the child says the correct answer, praise warmly.
+- Create new natural hints every time (do NOT repeat sentences).
 Task: "${task}"
-Correct answer (do not reveal): "${correct}"
-History:
-${Array.isArray(history) ? history.map(m => `${m.role}: ${m.content}`).join("\n") : ""}
-Child: "${message}"
-Respond as Tali with a short friendly hint or praise.
-`.trim();
+Correct answer (never reveal): "${correct}"
 
-    // Call Gemini
-    const modelUrl =
+Conversation:
+${history.map(m => m.role + ": " + m.content).join("\n")}
+
+Child: "${message}"
+Respond as Tali.
+    `.trim();
+
+    const url =
       "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
       process.env.GEMINI_API_KEY;
 
-    const modelRes = await fetch(modelUrl, {
+    const aiRes = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 64, temperature: 0.9 },
+        generationConfig: { maxOutputTokens: 50, temperature: 0.7 }
       }),
     });
 
-    const modelData = await modelRes.json().catch(() => ({}));
+    const data = await aiRes.json();
     const reply =
-      modelData?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
-      "Let's try a different way — count slowly on your fingers.";
+      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+      "Try looking at the numbers step by step! 🦕";
 
-    const headers = {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*", // <- CRITICAL
-    };
+    return res.status(200).json({ reply });
 
-    return new Response(JSON.stringify({ reply }), { status: 200, headers });
   } catch (err) {
-    console.error("Chat handler error:", err);
-    return new Response(JSON.stringify({ reply: "Tali is confused 🦕💫" }), {
-      status: 500,
-      headers: {
-        "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*",
-      },
-    });
+    console.error(err);
+    return res.status(500).json({ reply: "Tali is confused 🦕💫" });
   }
 }
