@@ -1,28 +1,54 @@
-export default async function handler(req, res) {
+export const config = {
+  runtime: "edge",
+};
+
+// Handle preflight CORS
+export function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+    },
+  });
+}
+
+export default async function handler(req) {
   try {
-    const { message, task, correct, history } = req.body;
+    const { message, task, correct, history } = await req.json();
 
+    // ----------------------------- PROMPT ------------------------------
     const prompt = `
-You are **Tali the Dino**, a friendly helper for children ages 5–8.
+You are **Tali the Dino**, a friendly, warm, encouraging tutor for children ages 5–8.
 
-Your behavior:
-- ALWAYS answer in **1–2 very short sentences.**
-- ALWAYS stay friendly, encouraging, positive.
+Your behavior rules:
+- Always answer in **1–2 short sentences**.
+- Always stay positive, supportive, and kind.
 - NEVER reveal the correct answer.
-- You may give hints like "count step by step", "look at the bigger group", "try using your fingers", etc.
-- If the child asks "help", "hint", or seems confused → give a helpful hint.
-- If the child gives the correct answer → say something like "Great job! Yes, that's right! 🦕"
-- If the child's answer is wrong → give a new, unique hint (not repeated).
-- You ALWAYS see the task: "${task}".
-- Correct answer is "${correct}", but you must NOT reveal it.
+- ALWAYS give gentle, helpful hints.
+- If the child explicitly asks for "help", "hint", "please help", etc — give a clear hint related to the task.
+- If the child’s answer matches the correct answer → say something like:
+  "Yes! That’s correct! Great job! 🦕✨"
+- If the child’s answer is wrong → do NOT repeat the same phrase, do NOT ignore.  
+  Give a **new small hint** each time. Hints must be related to the task.
+- You ALWAYS see the task and the correct answer, so your hints must be specific.
 
-Conversation history:
-${history.map(m => m.role + ": " + m.content).join("\n")}
+TASK:
+"${task}"
 
-Child says: "${message}"
+CORRECT ANSWER:
+"${correct}"
 
-Now respond as Tali in 1–2 short friendly sentences:
+CHAT HISTORY:
+${history.map(m => `${m.role}: ${m.content}`).join("\n")}
+
+USER MESSAGE:
+"${message}"
+
+Now reply as Tali.
 `;
+    // -------------------------------------------------------------------
 
     const apiResponse = await fetch(
       "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
@@ -32,6 +58,10 @@ Now respond as Tali in 1–2 short friendly sentences:
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            maxOutputTokens: 50,
+            temperature: 0.9,
+          }
         }),
       }
     );
@@ -40,12 +70,27 @@ Now respond as Tali in 1–2 short friendly sentences:
 
     const reply =
       data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "Let's try thinking step by step! 🦕";
+      "Let's keep trying together! 🦕";
 
-    res.status(200).json({ reply });
-
+    return new Response(JSON.stringify({ reply }), {
+      status: 200,
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/json",
+      },
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ reply: "Tali is confused 🦕💫" });
+    console.error("Chat backend error:", err);
+
+    return new Response(
+      JSON.stringify({ reply: "Tali is thinking too hard right now 🦕💫" }),
+      {
+        status: 500,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Content-Type": "application/json",
+        },
+      }
+    );
   }
 }
