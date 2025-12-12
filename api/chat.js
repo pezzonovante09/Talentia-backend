@@ -4,107 +4,64 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
-  // --------------
 
   try {
     const { message, task, correctAnswer, history = [] } = req.body;
-    const user = String(message).trim();
-    const correct = String(correctAnswer).trim().toLowerCase();
 
-    const isCorrect = user.toLowerCase() === correct;
-    const lastAssistant = history.slice().reverse().find(m => m.role === "assistant");
-    const lastText = lastAssistant?.content?.trim() || "";
-
-    // ---------------------------------------------
-    // 1) Если ответ правильный → похвала, НИКАКИХ подсказок
-    // ---------------------------------------------
-    if (isCorrect) {
-      return res.status(200).json({
-        reply: "Yes! That's correct! Great job! 🦕💚"
-      });
-    }
-
-    // ---------------------------------------------
-    // 2) Генерируем подсказку через модель (всегда)
-    // ---------------------------------------------
     const prompt = `
-You are Tali, a friendly dinosaur tutor for children aged 5–8.
+You are Tali, a friendly dinosaur who tutors children aged 5–9.
 
-TASK:
+Your personality:
+- Warm, upbeat, supportive
+- Speak very simply
+- Never more than 1–2 short sentences
+- Never reveal the answer directly
+- Use child-friendly reasoning: counting on fingers, grouping, comparing sizes, noticing details, etc.
+- If the child is just chatting, respond like a friendly dino friend.
+- If the message is unclear, ask a gentle clarifying question.
+
+TASK TO HELP WITH:
 "${task}"
 
-CORRECT ANSWER (DO NOT TELL): "${correctAnswer}"
+CORRECT ANSWER (DO NOT SAY OUT LOUD):
+"${correctAnswer}"
 
-USER MESSAGE:
-"${user}"
+CONVERSATION HISTORY:
+${history.map(m => `${m.role}: ${m.content}`).join("\n")}
 
-Your job:
-- ALWAYS respond with ONE short, simple hint that helps solve the task.
-- The hint MUST teach how to think (counting, comparing, using fingers, grouping, visualizing, etc.)
-- The hint MUST be child-friendly and warm.
-- NEVER reveal the answer.
-- NEVER say generic phrases like "Try again" or "Good try".
-- NEVER offer choices or talk about how to phrase things.
-- NEVER repeat the previous hint.
-- ALWAYS give a real strategy a child can use.
+USER SAID:
+"${message}"
 
-Previous hint from you:
-"${lastText}"
-
-Now produce ONE new helpful hint for the child. No explanations. No meta comments.
+Now respond as Tali:
+- Give a simple helpful hint if they need help.
+- If they are chatting, answer playfully.
+- If they are close, encourage gently.
+- DO NOT repeat previous hints word-for-word.
+- DO NOT say generic things like "try again" or "good job".
+- Think fresh each time.
 `;
 
-    let hint = await askGemini(prompt);
-
-    // если ответ совпал с предыдущим → регенерация
-    if (
-      hint &&
-      lastText &&
-      hint.trim().toLowerCase() === lastText.trim().toLowerCase()
-    ) {
-      hint = await askGemini(prompt + "\nIMPORTANT: Hint must be DIFFERENT.");
-    }
-
-    // если модель дала пустую фигню → fallback переформулировка
-    if (!hint || hint.length < 2) {
-      hint = await askGemini(
-        `Rephrase this child hint in a simpler way: "${lastText}"`
-      );
-    }
-
-    return res.status(200).json({
-      reply: hint || "Try counting slowly, you can do it! 🦕✨"
-    });
-
-  } catch (err) {
-    console.error("Backend error:", err);
-    return res.status(500).json({
-      reply: "Tali is confused right now 🦕💫"
-    });
-  }
-}
-
-// ----------------------------------------------------
-// Gemini caller
-// ----------------------------------------------------
-async function askGemini(prompt) {
-  try {
-    const apiRes = await fetch(
+    const rr = await fetch(
       "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
         process.env.GEMINI_API_KEY,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }]
-        })
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+        }),
       }
     );
 
-    const data = await apiRes.json();
-    return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null;
+    const data = await rr.json();
+
+    const reply =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ||
+      "Let's think together! 🦕";
+
+    res.status(200).json({ reply });
   } catch (err) {
-    console.error("Gemini error:", err);
-    return null;
+    console.error(err);
+    res.status(500).json({ reply: "Tali is confused 🦕💫" });
   }
 }
