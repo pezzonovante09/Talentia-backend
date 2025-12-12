@@ -4,84 +4,89 @@ export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
+  // --------------
 
   try {
     const { message, task, correctAnswer, history = [] } = req.body;
-
     const user = String(message).trim();
-    const correct = String(correctAnswer).trim();
-    const isCorrect = user === correct;
+    const correct = String(correctAnswer).trim().toLowerCase();
 
-    const lastAssistant = history
-      .slice()
-      .reverse()
-      .find((m) => m.role === "assistant");
+    const isCorrect = user.toLowerCase() === correct;
+    const lastAssistant = history.slice().reverse().find(m => m.role === "assistant");
     const lastText = lastAssistant?.content?.trim() || "";
 
-    const userWantsHint = /help|hint|подскажи|не понимаю|explain/i.test(
-      user.toLowerCase()
-    );
-
-    //----------------------------------------------
-    // CASE 1 — User answered CORRECTLY
-    //----------------------------------------------
+    // ---------------------------------------------
+    // 1) Если ответ правильный → похвала, НИКАКИХ подсказок
+    // ---------------------------------------------
     if (isCorrect) {
       return res.status(200).json({
-        reply: "Yes! That's correct! You're amazing! 🦕💚",
+        reply: "Yes! That's correct! Great job! 🦕💚"
       });
     }
 
-    //----------------------------------------------
-    // CASE 2 — User wants a hint → generate hint
-    //----------------------------------------------
-    if (userWantsHint) {
-      const prompt = `
-You are Tali — a friendly dinosaur tutor for kids aged 5–8.
-Give ONE short hint that helps with this task.
-Never reveal the answer.
-Always be friendly, simple and encouraging.
-Do not repeat your previous hint.
+    // ---------------------------------------------
+    // 2) Генерируем подсказку через модель (всегда)
+    // ---------------------------------------------
+    const prompt = `
+You are Tali, a friendly dinosaur tutor for children aged 5–8.
 
-Task: "${task}"
-Correct answer (DO NOT TELL): "${correct}"
+TASK:
+"${task}"
 
-Previous assistant message: "${lastText}"
-User message: "${user}"
+CORRECT ANSWER (DO NOT TELL): "${correctAnswer}"
 
-Now give ONE helpful hint for a child.
+USER MESSAGE:
+"${user}"
+
+Your job:
+- ALWAYS respond with ONE short, simple hint that helps solve the task.
+- The hint MUST teach how to think (counting, comparing, using fingers, grouping, visualizing, etc.)
+- The hint MUST be child-friendly and warm.
+- NEVER reveal the answer.
+- NEVER say generic phrases like "Try again" or "Good try".
+- NEVER offer choices or talk about how to phrase things.
+- NEVER repeat the previous hint.
+- ALWAYS give a real strategy a child can use.
+
+Previous hint from you:
+"${lastText}"
+
+Now produce ONE new helpful hint for the child. No explanations. No meta comments.
 `;
 
-      const hint = await askGemini(prompt);
+    let hint = await askGemini(prompt);
 
-      return res.status(200).json({
-        reply: hint || "Try looking carefully again — you can do it!",
-      });
+    // если ответ совпал с предыдущим → регенерация
+    if (
+      hint &&
+      lastText &&
+      hint.trim().toLowerCase() === lastText.trim().toLowerCase()
+    ) {
+      hint = await askGemini(prompt + "\nIMPORTANT: Hint must be DIFFERENT.");
     }
 
-    //----------------------------------------------
-    // CASE 3 — Wrong answer, but no hint asked
-    //----------------------------------------------
-    const encouragements = [
-      "Good try! Want a hint? 🦕💚",
-      "Almost! You can ask me for help anytime 🦕✨",
-      "Nice effort! If you need help, just say 'help'!",
-      "You're doing great! Say 'hint' if you want help!",
-      "Keep going! I can help if you ask! 🌟",
-    ];
+    // если модель дала пустую фигню → fallback переформулировка
+    if (!hint || hint.length < 2) {
+      hint = await askGemini(
+        `Rephrase this child hint in a simpler way: "${lastText}"`
+      );
+    }
 
-    const filtered = encouragements.filter((e) => e !== lastText);
-    const reply = filtered[Math.floor(Math.random() * filtered.length)];
+    return res.status(200).json({
+      reply: hint || "Try counting slowly, you can do it! 🦕✨"
+    });
 
-    return res.status(200).json({ reply });
   } catch (err) {
     console.error("Backend error:", err);
-    return res.status(500).json({ reply: "Tali is confused right now 🦕💫" });
+    return res.status(500).json({
+      reply: "Tali is confused right now 🦕💫"
+    });
   }
 }
 
-// ---------------------------------------------------------
-// Gemini helper function
-// ---------------------------------------------------------
+// ----------------------------------------------------
+// Gemini caller
+// ----------------------------------------------------
 async function askGemini(prompt) {
   try {
     const apiRes = await fetch(
@@ -91,8 +96,8 @@ async function askGemini(prompt) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-        }),
+          contents: [{ role: "user", parts: [{ text: prompt }] }]
+        })
       }
     );
 
