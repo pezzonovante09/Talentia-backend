@@ -1,4 +1,14 @@
 export default async function handler(req, res) {
+  // --- FIX CORS ---
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+  // ----------------
+
   try {
     const { message, task, correctAnswer, attempts, mistakes, history } = req.body;
 
@@ -11,9 +21,9 @@ Answer VERY SHORT: max 1–2 sentences. Simple words only.
 Never reveal the correct answer.
 Never continue giving hints after the kid answered correctly.
 
-Current task: "${task}"
+Task: "${task}"
 Correct answer: "${correctAnswer}"
-User mistakes so far: ${mistakes}
+Mistakes: ${mistakes}
 
 Conversation:
 ${history.map(m => m.role + ": " + m.content).join("\n")}
@@ -21,18 +31,19 @@ ${history.map(m => m.role + ": " + m.content).join("\n")}
 User: ${message}
 `;
 
-    // --- CASE 1: Correct answer ---
+    // ---------- CORRECT ANSWER ----------
     if (isCorrect) {
-      const reply = "Yes! That's correct! Great job! 🦕💚";
-      return res.status(200).json({ reply });
+      return res.status(200).json({
+        reply: "Yes! That's correct! Great job! 🦕💚"
+      });
     }
 
-    // --- CASE 2: User explicitly asked for help ---
+    // ---------- HELP REQUEST ----------
     if (userAskedHelp) {
       const helpPrompt = basePrompt + `
-The child is asking for help.
-Give ONE tiny hint only. Do NOT give the answer.
-Your reply:`;
+The child asked for help.
+Give ONE very small hint.
+Do NOT give the correct answer.`;
 
       const apiRes = await fetch(
         "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
@@ -42,24 +53,23 @@ Your reply:`;
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             contents: [{ role: "user", parts: [{ text: helpPrompt }] }]
-          }),
+          })
         }
       );
 
       const data = await apiRes.json();
       const reply =
         data?.candidates?.[0]?.content?.parts?.[0]?.text ??
-        "Try looking at the numbers carefully!";
+        "Maybe try counting again?";
 
       return res.status(200).json({ reply });
     }
 
-    // --- CASE 3: Wrong answer (child guessed) ---
+    // ---------- WRONG ANSWER ----------
     const wrongPrompt = basePrompt + `
 The child gave a wrong answer.
-Respond with ONE short encouraging hint.
-Do NOT give the correct answer.
-Your reply:`;
+Give ONE short encouraging hint.
+Do NOT give the correct answer.`;
 
     const apiRes = await fetch(
       "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
@@ -69,19 +79,19 @@ Your reply:`;
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ role: "user", parts: [{ text: wrongPrompt }] }]
-        }),
+        })
       }
     );
 
     const data = await apiRes.json();
     const reply =
       data?.candidates?.[0]?.content?.parts?.[0]?.text ??
-      "Try again! Look closely, you can do it!";
+      "Try again! You can do it!";
 
     return res.status(200).json({ reply });
 
-  } catch (e) {
-    console.error("Backend error:", e);
+  } catch (err) {
+    console.error("Backend error:", err);
     return res.status(500).json({ reply: "Tali is confused 🦕💫" });
   }
 }
