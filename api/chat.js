@@ -1,46 +1,100 @@
+// api/chat.js
 export default async function handler(req, res) {
-  // --- CORS HEADERS ---
+  // --- CORS ---
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  // -- End CORS --
 
-  if (req.method === "OPTIONS") {
-    return res.status(200).end();
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
+  // -------------------
 
   try {
-    const { message, task, correctAnswer, history } = req.body;
+    const { message, task, correctAnswer, history = [] } = req.body || {};
 
-    const userText = message.trim().toLowerCase();
-    const correctText = String(correctAnswer).trim();
+    const userText = String(message).trim();
+    const correctText = String(correctAnswer).trim().toLowerCase();
 
-    const isCorrect = userText === correctText.toLowerCase();
-    const isHelpRequest = /help|hint|подскажи|не понимаю|explain/i.test(userText);
+    const lastAssistant = history
+      ?.slice()
+      ?.reverse()
+      ?.find((m) => m.role === "assistant");
+    const lastAssistantText = lastAssistant ? lastAssistant.content.trim() : "";
 
-    // If the answer is correct → praise only
+    const isCorrect =
+      userText.toLowerCase() === correctText.toLowerCase();
+
+    // ----------------------
+    // If correct → praise
+    // ----------------------
     if (isCorrect) {
       return res.status(200).json({
-        reply: "Yes! That's correct! You're doing awesome! 🦕💚"
+        reply: "Yes! That's correct! You're amazing! 🦕💚"
       });
     }
 
-    // Build prompt for hint/help
-    const basePrompt = `
-You are Tali, a friendly tutor for children (age 5–8).
-Answer in 1–2 short, simple sentences.
+    // ----------------------
+    // Build prompt for generating hints
+    // ----------------------
+    const makePrompt = (forceDifferent = false) => `
+You are Tali — a friendly dinosaur tutor for children aged 5–8.
 
 Task: "${task}"
-Correct answer: "${correctAnswer}" (never tell the answer)
 
-User message: "${message}"
+Rules:
+- Never reveal the correct answer.
+- Respond in ONLY 1–2 very short sentences.
+- Keep the tone supportive and friendly.
+- Give a helpful hint appropriate for a child.
+- If user seems confused, explain even simpler.
+- DO NOT repeat yourself.
 
-Conversation:
-${history.map(m => m.role + ": " + m.content).join("\n")}
+User message: "${userText}"
 
-Respond with a helpful hint and encouragement.
+${
+  forceDifferent
+    ? `IMPORTANT: Your previous hint was:\n"${lastAssistantText}"\nYour NEW hint MUST be different from that.`
+    : ""
+}
+
+Conversation history:
+${history.map((m) => m.role + ": " + m.content).join("\n")}
+
+Now give a new hint:
 `;
 
+    // ----------------------
+    // 1st attempt: generate normal hint
+    // ----------------------
+    let hint = await callGemini(makePrompt(false));
+
+    // If Gemini returned exactly the same as last time → regenerate
+    if (
+      hint &&
+      lastAssistantText &&
+      hint.trim().toLowerCase() === lastAssistantText.trim().toLowerCase()
+    ) {
+      hint = await callGemini(makePrompt(true));
+    }
+
+    // If still empty → fallback to rephrase
+    if (!hint || hint.trim().length < 2) {
+      hint = await callGemini(
+        `Rephrase this hint to make it shorter and friendlier for a child: "${lastAssistantText}"`
+      );
+    }
+
+    return res.status(200).json({ reply: hint || "Try again!" });
+  } catch (err) {
+    console.error("Backend error:", err);
+    return res.status(500).json({ reply: "Tali is confused right now 🦕💫" });
+  }
+}
+
+// ----------------------
+// Gemini request helper
+// ----------------------
+async function callGemini(prompt) {
+  try {
     const apiRes = await fetch(
       "https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=" +
         process.env.GEMINI_API_KEY,
@@ -48,21 +102,17 @@ Respond with a helpful hint and encouragement.
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: basePrompt }] }],
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
         }),
       }
     );
 
     const data = await apiRes.json();
-    const reply =
-      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
-      "Try thinking in a new way — you can do it!";
-
-    return res.status(200).json({ reply });
+    return (
+      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || null
+    );
   } catch (err) {
-    console.error("Backend error:", err);
-    return res.status(500).json({
-      reply: "Tali is confused right now 🦕💫"
-    });
+    console.error("Gemini call error:", err);
+    return null;
   }
 }
